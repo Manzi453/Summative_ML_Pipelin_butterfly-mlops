@@ -68,6 +68,45 @@ locust -f locustfile.py --host http://localhost:8000
 Open http://localhost:8089, set users/spawn rate, run against 1 vs 2 API
 containers and record requests/sec + p95 latency for the comparison table.
 
+### Reproducing the 1 vs 2 container comparison
+
+`docker-compose.yml` publishes a fixed host port for `api`, so
+`docker compose up --scale api=2` can't bind two containers to the same host
+port. Instead, run a second container manually on another port and point
+Locust at both via `API_HOSTS` (see `locustfile.py`), which round-robins
+requests across hosts client-side:
+
+```bash
+# 1 container
+docker compose up -d api
+locust -f locustfile.py --host http://localhost:8000 --headless -u 20 -r 5 -t 45s
+
+# add a 2nd container on port 8001, same image
+docker run -d --name butterfly-api-2 -p 8001:8000 \
+  -v "$(pwd)/data":/app/data -v "$(pwd)/models":/app/models \
+  summative_ml_pipelin_butterfly-mlops-api:latest uvicorn app:app --host 0.0.0.0 --port 8000
+
+# 2 containers, same load profile
+API_HOSTS="http://localhost:8000,http://localhost:8001" \
+  locust -f locustfile.py --host http://localhost:8000 --headless -u 20 -r 5 -t 45s
+```
+
+### Results (20 users, spawn rate 5/s, 45s, `/predict` + `/status` mix)
+
+| Containers | Total requests | Req/s | Failures | Median latency | p95 latency | p99 latency | Max latency |
+|---|---|---|---|---|---|---|---|
+| 1 | 264 | 6.18 | 0 (0.00%) | 550 ms | 6100 ms | 7100 ms | 7131 ms |
+| 2 | 347 | 7.76 | 1 (0.29%)* | 260 ms | 2000 ms | 3900 ms | 4494 ms |
+
+\* one transient `RemoteDisconnected` on `/status`, not a failed prediction.
+
+Going from 1 to 2 containers raised throughput ~26% and cut p95 latency by
+~3x (6.1s → 2.0s) and median latency by ~2x (550ms → 260ms). Each container
+runs uvicorn single-process with a synchronous, CPU-bound EfficientNetB0
+inference call, so a single container serializes requests under load;
+horizontally scaling containers lets requests be served in parallel instead
+of queueing behind one process.
+
 ## 5. Deploy
 
 **Live app:** https://summativebutterfly-mlops.streamlit.app/
@@ -95,7 +134,8 @@ To deploy the FastAPI service separately (e.g. Render or Railway):
 | Retraining Process | `app.py` `/upload` + `/retrain`, `src/model.py` warm-start logic |
 | Prediction Process | `app.py` `/predict`, `ui/streamlit_app.py` Predict tab |
 | Evaluation of Models | `notebook/training_notebook.ipynb` |
-| Deployment Package | Docker + Render URL + Streamlit Insights tab |
+| Deployment Package | Docker + [live Streamlit app](https://summativebutterfly-mlops.streamlit.app/) + Insights tab (uptime, dataset charts) |
+| Flood Request Simulation | `locustfile.py` + "Load testing" section above (1 vs 2 container results) |
 
 ## Notes
 
