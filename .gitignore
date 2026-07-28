@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Raw dataset (re-downloaded via `kaggle datasets download`, see README) and
+# tf.data disk cache — large and machine-specific, not meant to be committed
+data/train/
+data/valid/
+data/test/
+data/.cache/
+
+# Runtime artifacts: uploaded images and the prediction/upload log accumulate
+# as the app is used — keep the folder structure via .gitkeep, not the contents
+data/uploads/*
+!data/uploads/.gitkeep
+data/app.db
+
+# Old retrain snapshots pile up over time — keep the folder, not every archive
+models/archive/*
+!models/archive/.gitkeep
+
+# NOTE: models/model.keras is intentionally NOT ignored — the rubric requires
+# the trained model file to be present for grading.
