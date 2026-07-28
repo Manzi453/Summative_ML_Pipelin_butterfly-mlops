@@ -28,8 +28,10 @@ from src.preprocessing import get_class_list
 UPLOADS_DIR = os.path.join(BASE_DIR, "data", "uploads")
 CSV_PATH = os.path.join(BASE_DIR, "data", "butterflies_and_moths.csv")
 
+st.set_page_config(page_title="Butterfly & Moth Classifier", layout="wide")
 
-@st.cache_resource
+
+@st.cache_resource(show_spinner=False)
 def init_backend():
     database.init_db()
     os.makedirs(UPLOADS_DIR, exist_ok=True)
@@ -37,7 +39,6 @@ def init_backend():
 
 init_backend()
 
-st.set_page_config(page_title="Butterfly & Moth Classifier", layout="wide")
 st.title("🦋 Butterfly & Moth Classifier — MLOps Pipeline")
 
 tab_predict, tab_retrain, tab_insights = st.tabs(["Predict", "Retrain", "Insights"])
