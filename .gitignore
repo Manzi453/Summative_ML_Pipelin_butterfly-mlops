@@ -13,9 +13,7 @@ venv/
 
 # Raw dataset (re-downloaded via `kaggle datasets download`, see README) and
 # tf.data disk cache — large and machine-specific, not meant to be committed
-data/train/
-data/valid/
-data/test/
+
 data/.cache/
 
 # Runtime artifacts: uploaded images and the prediction/upload log accumulate

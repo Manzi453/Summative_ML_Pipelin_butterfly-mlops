@@ -11,6 +11,7 @@ same logic over HTTP for local/Docker use.
 """
 import os
 import sys
+import time
 import datetime
 
 import pandas as pd
@@ -37,7 +38,14 @@ def init_backend():
     os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 
+@st.cache_resource(show_spinner=False)
+def get_start_time():
+    """Cached so it's set once per server process, not on every script rerun."""
+    return time.time()
+
+
 init_backend()
+APP_START_TIME = get_start_time()
 
 st.title("🦋 Butterfly & Moth Classifier — MLOps Pipeline")
 
@@ -138,10 +146,15 @@ with tab_insights:
             if model_exists
             else None
         )
+        uptime_seconds = time.time() - APP_START_TIME
+        hours, rem = divmod(int(uptime_seconds), 3600)
+        minutes, seconds = divmod(rem, 60)
+        st.metric("App uptime", f"{hours}h {minutes}m {seconds}s")
         st.json({
             "model_loaded": model_exists,
             "last_retrain": last_modified,
             "num_classes": len(classes),
+            "uptime_seconds": round(uptime_seconds, 1),
             **database.get_stats(),
         })
     except Exception as e:

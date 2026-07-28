@@ -70,7 +70,16 @@ containers and record requests/sec + p95 latency for the comparison table.
 
 ## 5. Deploy
 
-Render (or Railway):
+**Live app:** https://summativebutterfly-mlops.streamlit.app/
+
+Deployed on Streamlit Community Cloud. The deployed Streamlit app calls
+`src/` prediction, model, and database logic directly in-process (see
+`ui/streamlit_app.py` docstring) so there is no separate hosted FastAPI
+service for this deployment — `app.py` + `docker-compose.yml` still expose
+the same logic over HTTP for local/Docker use and for the Locust load test
+below.
+
+To deploy the FastAPI service separately (e.g. Render or Railway):
 - New Web Service → connect this repo
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn app:app --host 0.0.0.0 --port $PORT`

@@ -7,6 +7,7 @@ FastAPI app. Endpoints:
 """
 import os
 import shutil
+import time
 import datetime
 
 from fastapi import FastAPI, UploadFile, File, Form
@@ -19,6 +20,8 @@ from src.preprocessing import get_class_list
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOADS_DIR = os.path.join(BASE_DIR, "data", "uploads")
+
+START_TIME = time.time()
 
 app = FastAPI(title="Butterfly & Moth Classifier API")
 
@@ -50,6 +53,7 @@ def status():
         "model_loaded": model_exists,
         "last_retrain": last_modified,
         "num_classes": len(classes),
+        "uptime_seconds": round(time.time() - START_TIME, 1),
         **stats,
     }
 
