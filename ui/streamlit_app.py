@@ -3,16 +3,39 @@ Streamlit UI — three tabs:
   Predict  : upload an image, get species + confidence + top-3
   Retrain  : upload labeled images, trigger warm-start retrain
   Insights : dataset class distribution + sample grid + model status
+
+Calls src/ prediction, model, and database logic directly in-process
+(no separate FastAPI backend) so the app runs as a single Streamlit
+Community Cloud service. app.py + docker-compose.yml still expose the
+same logic over HTTP for local/Docker use.
 """
 import os
-import io
-import requests
+import sys
+import datetime
+
 import pandas as pd
 import streamlit as st
-from PIL import Image
 
-API_URL = os.environ.get("API_URL", "http://localhost:8000")
-CSV_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "butterflies_and_moths.csv")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from src import database
+from src.prediction import predict_image
+from src.model import retrain as model_retrain, MODEL_PATH
+from src.preprocessing import get_class_list
+
+UPLOADS_DIR = os.path.join(BASE_DIR, "data", "uploads")
+CSV_PATH = os.path.join(BASE_DIR, "data", "butterflies_and_moths.csv")
+
+
+@st.cache_resource
+def init_backend():
+    database.init_db()
+    os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+
+init_backend()
 
 st.set_page_config(page_title="Butterfly & Moth Classifier", layout="wide")
 st.title("🦋 Butterfly & Moth Classifier — MLOps Pipeline")
@@ -27,20 +50,16 @@ with tab_predict:
     if uploaded is not None:
         st.image(uploaded, width=300)
         if st.button("Run prediction"):
-            files = {"file": (uploaded.name, uploaded.getvalue())}
-            with st.spinner("Calling prediction API..."):
-                resp = requests.post(f"{API_URL}/predict", files=files, timeout=60)
-            if resp.status_code == 200:
-                result = resp.json()
-                if "error" in result:
-                    st.error(result["error"])
-                else:
-                    st.success(f"Predicted: **{result['label']}** ({result['confidence']*100:.1f}% confidence)")
-                    st.write("Top 3:")
-                    for p in result["top_predictions"]:
-                        st.write(f"- {p['label']}: {p['confidence']*100:.1f}%")
+            with st.spinner("Running prediction..."):
+                result = predict_image(uploaded.getvalue(), filename=uploaded.name)
+            if "error" in result:
+                st.error(result["error"])
             else:
-                st.error(f"API error: {resp.status_code} — {resp.text}")
+                database.log_prediction(uploaded.name, result["label"], result["confidence"])
+                st.success(f"Predicted: **{result['label']}** ({result['confidence']*100:.1f}% confidence)")
+                st.write("Top 3:")
+                for p in result["top_predictions"]:
+                    st.write(f"- {p['label']}: {p['confidence']*100:.1f}%")
 
 # ---------------------------------------------------------------- Retrain --
 with tab_retrain:
@@ -59,29 +78,35 @@ with tab_retrain:
     )
 
     if batch and st.button("Upload batch"):
+        classes, _, _ = get_class_list()
         progress = st.progress(0)
         for i, f in enumerate(batch):
-            files = {"file": (f.name, f.getvalue())}
-            data = {"label": label}
-            requests.post(f"{API_URL}/upload", files=files, data=data, timeout=60)
+            if label not in classes:
+                st.error(f"Unknown label '{label}'. Must be one of the existing 100 species.")
+                break
+            class_dir = os.path.join(UPLOADS_DIR, label)
+            os.makedirs(class_dir, exist_ok=True)
+            save_path = os.path.join(class_dir, f.name)
+            with open(save_path, "wb") as out:
+                out.write(f.getvalue())
+            database.log_upload(f.name, label, save_path)
             progress.progress((i + 1) / len(batch))
-        st.success(f"Uploaded {len(batch)} image(s) for '{label}'.")
+        else:
+            st.success(f"Uploaded {len(batch)} image(s) for '{label}'.")
 
     st.divider()
     st.subheader("Trigger retraining")
     epochs = st.slider("Epochs", min_value=1, max_value=15, value=5)
     if st.button("Retrain model now"):
-        with st.spinner("Retraining — this can take a few minutes..."):
-            resp = requests.post(f"{API_URL}/retrain", params={"epochs": epochs}, timeout=1800)
-        if resp.status_code == 200:
-            result = resp.json()
-            if "error" in result:
-                st.warning(result["error"])
-            else:
-                st.success(f"Retrained on {result['images_used']} images. "
-                           f"Final accuracy: {result['final_accuracy']*100:.1f}%")
+        pending = database.get_pending_uploads()
+        if not pending:
+            st.warning("No new uploaded images to retrain on. Upload some first.")
         else:
-            st.error(f"API error: {resp.status_code} — {resp.text}")
+            with st.spinner("Retraining — this can take a few minutes..."):
+                result = model_retrain(new_data_dir=UPLOADS_DIR, epochs=epochs)
+                database.mark_uploads_used([row["id"] for row in pending])
+            st.success(f"Retrained on {len(pending)} images. "
+                       f"Final accuracy: {result['final_accuracy']*100:.1f}%")
 
 # --------------------------------------------------------------- Insights --
 with tab_insights:
@@ -105,8 +130,18 @@ with tab_insights:
     st.divider()
     st.subheader("Model status")
     try:
-        resp = requests.get(f"{API_URL}/status", timeout=10)
-        if resp.status_code == 200:
-            st.json(resp.json())
+        classes, _, _ = get_class_list()
+        model_exists = os.path.exists(MODEL_PATH)
+        last_modified = (
+            datetime.datetime.fromtimestamp(os.path.getmtime(MODEL_PATH)).isoformat()
+            if model_exists
+            else None
+        )
+        st.json({
+            "model_loaded": model_exists,
+            "last_retrain": last_modified,
+            "num_classes": len(classes),
+            **database.get_stats(),
+        })
     except Exception as e:
-        st.warning(f"Could not reach API for status: {e}")
+        st.warning(f"Could not load model status: {e}")
