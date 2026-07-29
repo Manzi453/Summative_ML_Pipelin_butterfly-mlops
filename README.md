@@ -166,8 +166,10 @@ docker compose up --build
 
 ## Load testing
 
-Simulated concurrent traffic against `/predict` using Locust, comparing a
-single API container against two:
+Simulated concurrent traffic against `/predict` using Locust, comparing one
+API instance against two. Raw results (CSVs + HTML reports) are committed
+under [`results/`](results/): `locust_1container.*` and
+`locust_2containers.*`.
 
 ```bash
 locust -f locustfile.py --host http://localhost:8000
@@ -175,19 +177,24 @@ locust -f locustfile.py --host http://localhost:8000
 
 ### Results (20 users, spawn rate 5/s, 45s, `/predict` + `/status` mix)
 
-| Containers | Total requests | Req/s | Failures | Median latency | p95 latency | p99 latency | Max latency |
+| Instances | Total requests | Req/s | Failures | Median latency | p95 latency | p99 latency | Max latency |
 |---|---|---|---|---|---|---|---|
-| 1 | 264 | 6.18 | 0 (0.00%) | 550 ms | 6100 ms | 7100 ms | 7131 ms |
-| 2 | 347 | 7.76 | 1 (0.29%)* | 260 ms | 2000 ms | 3900 ms | 4494 ms |
+| 1 | 381 | 8.62 | 0 (0.00%) | 180 ms | 840 ms | 1500 ms | 3156 ms |
+| 2 | 399 | 9.04 | 0 (0.00%) | 100 ms | 370 ms | 4500 ms | 5422 ms |
 
-\* one transient `RemoteDisconnected` on `/status`, not a failed prediction.
-
-Going from one to two containers raised throughput ~26% and cut p95 latency
-by ~3x (6.1s → 2.0s) and median latency by ~2x (550ms → 260ms). Each
-container runs a single uvicorn process performing synchronous, CPU-bound
-EfficientNetB0 inference, so one container serializes requests under load;
-horizontally scaling containers lets requests be served in parallel instead
-of queueing behind a single process.
+Going from one to two instances roughly halved median latency (180ms →
+100ms) and raised throughput slightly (8.62 → 9.04 req/s), but tail latency
+(p99, max) got *worse*, not better. Both instances were run as separate
+processes on the same machine for this test, so two concurrent, CPU-bound
+EfficientNetB0 inference workloads ended up competing for the same CPU
+cores instead of running on genuinely separate resources — the classic
+case is worse-case latency actually improves, so this result depends on
+available CPU headroom. On real infrastructure (separate Docker containers
+scheduled across multiple cores/hosts, e.g. via `docker compose up --scale
+api=2` behind a load balancer, or a cloud autoscaler), the extra CPU
+headroom removes that contention and tail latency should improve alongside
+throughput, matching the horizontal-scaling behavior the median-latency
+improvement already hints at here.
 
 <details>
 <summary>Reproducing the 1 vs 2 container comparison</summary>
@@ -201,7 +208,8 @@ round-robins requests across hosts client-side:
 ```bash
 # 1 container
 docker compose up -d api
-locust -f locustfile.py --host http://localhost:8000 --headless -u 20 -r 5 -t 45s
+locust -f locustfile.py --host http://localhost:8000 --headless -u 20 -r 5 -t 45s \
+  --csv=results/locust_1container --html=results/locust_1container.html
 
 # add a 2nd container on port 8001, same image
 docker run -d --name butterfly-api-2 -p 8001:8000 \
@@ -210,8 +218,16 @@ docker run -d --name butterfly-api-2 -p 8001:8000 \
 
 # 2 containers, same load profile
 API_HOSTS="http://localhost:8000,http://localhost:8001" \
-  locust -f locustfile.py --host http://localhost:8000 --headless -u 20 -r 5 -t 45s
+  locust -f locustfile.py --host http://localhost:8000 --headless -u 20 -r 5 -t 45s \
+  --csv=results/locust_2containers --html=results/locust_2containers.html
 ```
+
+The results above were captured the same way, using two local `uvicorn`
+processes (ports 8000/8001) rather than `docker run` — same isolation model
+(independent server processes), substituted because the Docker daemon
+wasn't available in the environment this was reproduced in. Re-run the
+commands above with a running Docker daemon for literal container-to-
+container numbers if needed.
 
 </details>
 
