@@ -8,7 +8,7 @@ and Docker, with load testing via Locust.
 
 **Live app:** https://summativebutterfly-mlops.streamlit.app/
 
-**Video demo:** [YouTube link — PLACEHOLDER, replace before submission](https://youtube.com/watch?v=PLACEHOLDER)
+**Video demo:** https://www.awesomescreenshot.com/video/55071011?key=4a7b70347c46e563419ba396ac6d6cbb
 
 ## Overview
 
