@@ -7,6 +7,7 @@ on-demand retraining — packaged behind a FastAPI backend, a Streamlit UI,
 and Docker, with load testing via Locust.
 
 **Live app:** https://summativebutterfly-mlops.streamlit.app/
+
 **Video demo:** [YouTube link — PLACEHOLDER, replace before submission](https://youtube.com/watch?v=PLACEHOLDER)
 
 ## Overview

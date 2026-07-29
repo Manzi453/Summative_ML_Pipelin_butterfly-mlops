@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences
+POST,/predict,HTTPError('500 Server Error: Internal Server Error for url: /predict'),22
